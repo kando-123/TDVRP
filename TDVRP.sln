@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36203.30 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TDVRP", "TDVRP\TDVRP.csproj", "{486E8033-4F59-40B8-BEEC-A06DB33CEEB4}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{486E8033-4F59-40B8-BEEC-A06DB33CEEB4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{486E8033-4F59-40B8-BEEC-A06DB33CEEB4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{486E8033-4F59-40B8-BEEC-A06DB33CEEB4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{486E8033-4F59-40B8-BEEC-A06DB33CEEB4}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {2838A7DC-96A5-4A67-87A3-A8C94B93C608}
+	EndGlobalSection
+EndGlobal
