@@ -95,7 +95,7 @@ class Graph:
         for simplex in tri.simplices:
             for i in range(3):
                 u, v = simplex[i], simplex[(i + 1) % 3]
-                e = sorted([u, v])
+                e = (u, v) if u < v else (v, u)
                 edges.append(e)
         faces = [ list(simplex) for simplex in tri.simplices ]
         return edges, faces
@@ -124,62 +124,63 @@ class Graph:
             draw_vertex(i, self.vertices[i][0], self.vertices[i][1])
         
         # Plot settings
-        axes.set_title(f'Graph for {len(self.centroids)} centroids')
+        axes.set_title(f'Graph: {len(self.centroids)} centroids, '
+            + f'{len(self.vertices)} vertices')
         axes.set_aspect('equal', adjustable='datalim')
         plot.draw()
     
-    # a, b, c - sides of the triangle
-    def min_angle_deg(a, b, c):
-        α = np.arccos( (b*b + c*c - a*a) / (2*b*c) )
-        β = np.arccos( (c*c + a*a - b*b) / (2*c*a) )
-        γ = np.pi - (α + β)
-        α = np.degrees(α)
-        β = np.degrees(β)
-        γ = np.degrees(γ)
-        return min(α, β, γ)
-    
-    # triangle: list of three vertices (not their indexes)
-    def is_narrow(triangle, threshold_deg):
-        A, B, C = [triangle[i] for i in range(3)]
-        a = math.hypot(B[0] - C[0], B[1] - C[1])
-        b = math.hypot(C[0] - A[0], C[1] - A[1])
-        c = math.hypot(A[0] - B[0], A[1] - B[1])
-        return Graph.min_angle_deg(a, b, c) < threshold_deg
-    
-    def longest_side(triangle):
-        sides = [ math.hypot(triangle[(i+1)%3][0] - triangle[(i+2)%3][0],
-                             triangle[(i+1)%3][1] - triangle[(i+2)%3][1])
-                             for i in range(3) ]
-        for i in range(3):
-            if sides[i] > sides[(i+1)%3] and sides[i] >= sides[(i+2)%3]:
-                return [(i+1)%3, (i+2)%3]
-        return [0, 1]   # If all are equal
+    def handle_simplex(self, tri):
+        i, j, k = tri[0], tri[1], tri[2]
+        # print(f'face {i}-{j}-{k}', end=': ')
+        u, v, w = self.vertices[i], self.vertices[j], self.vertices[k]
+        # print(f'({u[0]:.2f}, {u[1]:.2f})-({v[0]:.2f}, {v[1]:.2f})-({w[0]:.2f}, {w[1]:.2f});')
+        x = math.hypot(v[0] - w[0], v[1] - w[1])
+        y = math.hypot(w[0] - u[0], w[1] - u[1])
+        z = math.hypot(u[0] - v[0], u[1] - v[1])
+        # print(f'\tx = |{j}:{k}| = {x:.2f}')
+        # print(f'\ty = |{k}:{i}| = {y:.2f}')
+        # print(f'\tz = |{i}:{j}| = {z:.2f}')
+        a = np.degrees( np.arccos( (y*y + z*z - x*x) / (2*y*z) ) )
+        b = np.degrees( np.arccos( (z*z + x*x - y*y) / (2*z*x) ) )
+        c = np.degrees( np.arccos( (x*x + y*y - z*z) / (2*x*y) ) )
+        # print(f'\ta = ang {i} = {a:.2f} deg')
+        # print(f'\tb = ang {j} = {b:.2f} deg')
+        # print(f'\tc = ang {k} = {c:.2f} deg')
+        edges = [ ]
+        if min(a, b, c) < 20:
+            if x > y and x >= z:
+                edges.append((j, k))
+                edges.append((k, j))
+            elif y > z and y >= x:
+                edges.append((k, i))
+                edges.append((i, k))
+            elif z > x and z >= y:
+                edges.append((i, j))
+                edges.append((j, i))
+        return edges
     
     def reduce_narrow_triangles(self, faces, threshold_deg=20):
+        removables = [ ]
         for face in faces:
-            triangle = [self.vertices[i] for i in face]
-            if Graph.is_narrow(triangle, threshold_deg):
-                print(f'triangle {face[0]}-{face[1]}-{face[2]} is narrow')
-                (m, n) = Graph.longest_side(triangle)   # m, n in 0:2
-                e = sorted([face[m], face[n]])
-                self.edges.remove(e)
+            removables.extend(self.handle_simplex(face))
+        self.edges = list(set(self.edges) - set(removables))
 
-def multiple_range(begin, end, samples):
+def params(first, last, multipliers):
     list = [ ]
-    for i in range(begin, end):
-        list += [i] * samples
+    for c in range(first, last + 1):
+        for m in multipliers:
+            list.append((c, int(m*c)))
     return list
 
 def main():
     graphs = [ ]
     
-    BEGIN   =  2
-    END     = 13
-    SAMPLES =  3
-    VERTICES_PER_CENTROID = 2.5
+    FIRST =  5
+    LAST  = 20
+    MULTS = [1.6, 2.0, 2.4, 2.8, 3.2]
     
-    for n in multiple_range(BEGIN, END, SAMPLES):
-        graph = Graph(n, int(VERTICES_PER_CENTROID * n))
+    for c, v in params(FIRST, LAST, MULTS):
+        graph = Graph(c, v)
         graphs.append(graph)
     
     figure, axes = plot.subplots()
@@ -201,7 +202,7 @@ def main():
                 self.index -= 1
                 graphs[self.index].plot(axes)
 
-    callback = Index((END - BEGIN) * SAMPLES)
+    callback = Index((LAST - FIRST + 1) * len(MULTS))
     axes_prev = plot.axes([0.7, 0.05, 0.1, 0.075])
     axes_next = plot.axes([0.8, 0.05, 0.1, 0.075])
     button_next = Button(axes_next, 'Next')
@@ -214,7 +215,6 @@ def main():
 main()
 
 # Do zrobienia:
-#  + łączenie wierzchołków krawędziami
 #  + rozpoznawanie "śródmiejskich" obszarów
 #  + generowanie prędkości i czasu przejazdu
 #  + wypisywanie do JSON-a
