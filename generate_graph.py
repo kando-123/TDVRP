@@ -1,6 +1,7 @@
 import json
 import math
 import numpy as np
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plot
 from matplotlib.patches import Circle
 from matplotlib.widgets import Button
@@ -10,8 +11,10 @@ class Graph:
     def __init__(self, n_centroids, n_vertices):
         self.centroids = Graph.generate_centroids(n_centroids)
         self.vertices = Graph.generate_vertices(n_vertices, self.centroids)
+        self.shift_overlapping_vertices()
         self.edges, faces = Graph.delaunay_triangulation(self.vertices)
-        self.reduce_narrow_triangles(faces)
+        self.reduce_narrow_triangles(faces, 30)
+        self.speeds = self.edge_speeds()
     
     def generate_centroids(count: int) -> list[ tuple[ float, float ] ]:
         # The centroids should be placed in more or less equal angular distances.
@@ -74,19 +77,34 @@ class Graph:
         distances = Graph.nearest_neighbor_distances(centroids)
         allocation = Graph.dhondt_method(count, distances)
         for c in range(len(centroids)):
-            # Handle a single centroid in this loop...
             x_cen, y_cen = centroids[c][0], centroids[c][1]
             d = distances[c]
             n_ver = allocation[c]
             for _ in range(n_ver):
-                # ...and in this one, handle a single vertex
                 ph = np.random.rand() * math.tau
-                MEAN = 0.5 * d
-                SDEV = 0.3 * d
+                MEAN = 0.6 * d
+                SDEV = 0.2 * d
                 r = np.random.normal(MEAN, SDEV, 1)[0]
                 v = (x_cen + r * math.cos(ph), y_cen + r * math.sin(ph))
                 vertices.append(v)
         return vertices
+    
+    def shift_overlapping_vertices(self):
+        EPSILON = 0.1
+        EPSILON_SEMIDIAGONAL = 0.5 * EPSILON / math.sqrt(2)
+        while True:
+            overlaps = [ ]
+            for i in range(len(self.vertices)):
+                for j in range(i + 1, len(self.vertices)):
+                    (x1, y1), (x2, y2) = self.vertices[i], self.vertices[j]
+                    if x1 == x2 and y1 == y2:
+                        overlaps.append((i, j))
+            if not overlaps:
+                break
+            for i, j in overlaps:
+                (x1, y1), (x2, y2) = self.vertices[i], self.vertices[j]
+                self.vertices[i] = (x1 - EPSILON_SEMIDIAGONAL, y1 - EPSILON_SEMIDIAGONAL)
+                self.vertices[j] = (x2 + EPSILON_SEMIDIAGONAL, y2 + EPSILON_SEMIDIAGONAL)
     
     def delaunay_triangulation(vertices: list[ tuple[float, float] ]):
         points = np.array(vertices)
@@ -100,52 +118,15 @@ class Graph:
         faces = [ list(simplex) for simplex in tri.simplices ]
         return edges, faces
     
-    def plot(self, axes):
-        axes.clear()
-        
-        # Edges
-        for e in self.edges:
-            (u, v) = e
-            (x1, y1) = self.vertices[u]
-            (x2, y2) = self.vertices[v]
-            axes.plot([x1, x2], [y1, y2], 'k-', zorder=1)
-        
-        # Centroids
-        xc, yc = zip(*self.centroids)
-        axes.plot(xc, yc, 'r+')
-        
-        # Vertices
-        def draw_vertex(i, x, y):
-            circle = Circle((x, y), 0.3, color='white', ec='blue', linewidth=2)
-            axes.add_patch(circle)
-            axes.text(x, y, str(i), ha='center', va='center', fontsize=10, color='blue', zorder=2)
-        
-        for i in range(len(self.vertices)):
-            draw_vertex(i, self.vertices[i][0], self.vertices[i][1])
-        
-        # Plot settings
-        axes.set_title(f'Graph: {len(self.centroids)} centroids, '
-            + f'{len(self.vertices)} vertices')
-        axes.set_aspect('equal', adjustable='datalim')
-        plot.draw()
-    
     def handle_simplex(self, tri):
         i, j, k = tri[0], tri[1], tri[2]
-        # print(f'face {i}-{j}-{k}', end=': ')
         u, v, w = self.vertices[i], self.vertices[j], self.vertices[k]
-        # print(f'({u[0]:.2f}, {u[1]:.2f})-({v[0]:.2f}, {v[1]:.2f})-({w[0]:.2f}, {w[1]:.2f});')
         x = math.hypot(v[0] - w[0], v[1] - w[1])
         y = math.hypot(w[0] - u[0], w[1] - u[1])
         z = math.hypot(u[0] - v[0], u[1] - v[1])
-        # print(f'\tx = |{j}:{k}| = {x:.2f}')
-        # print(f'\ty = |{k}:{i}| = {y:.2f}')
-        # print(f'\tz = |{i}:{j}| = {z:.2f}')
         a = np.degrees( np.arccos( (y*y + z*z - x*x) / (2*y*z) ) )
         b = np.degrees( np.arccos( (z*z + x*x - y*y) / (2*z*x) ) )
         c = np.degrees( np.arccos( (x*x + y*y - z*z) / (2*x*y) ) )
-        # print(f'\ta = ang {i} = {a:.2f} deg')
-        # print(f'\tb = ang {j} = {b:.2f} deg')
-        # print(f'\tc = ang {k} = {c:.2f} deg')
         edges = [ ]
         if min(a, b, c) < 20:
             if x > y and x >= z:
@@ -164,6 +145,95 @@ class Graph:
         for face in faces:
             removables.extend(self.handle_simplex(face))
         self.edges = list(set(self.edges) - set(removables))
+    
+    # Well-connected: having at least two neighbors; neither a leaf, nor isolated
+    def is_well_connected(self, vertex):
+        neighbors = set( )
+        for e in self.edges:
+            if e[0] == vertex:
+                neighbors.add(e[1])
+                if len(neighbors) > 1:
+                    return True
+            elif e[1] == vertex:
+                neighbors.add(e[0])
+                if len(neighbors) > 1:
+                    return True
+        return False
+    
+    def average_neighbor_distance(self, vertex):
+        neighbors = set( )
+        for e in self.edges:
+            if e[0] == vertex:
+                neighbors.add(e[1])
+            elif e[1] == vertex:
+                neighbors.add(e[0])
+        (x0, y0) = self.vertices[vertex]
+        length = 0
+        for n in neighbors:
+            (x, y) = self.vertices[n]
+            length += math.hypot(x - x0, y - y0)
+        return length / len(neighbors) if len(neighbors) > 0 else None
+    
+    def vertex_colors(self):
+        avg_dist = [self.average_neighbor_distance(i) for i in range(len(self.vertices))]
+        avg_dist_valid = [ x for x in avg_dist if x is not None ]
+        lo = min(avg_dist_valid)
+        hi = max(avg_dist_valid)
+        
+        if hi != lo:
+            a = 1 / (hi - lo)
+            b = -a * lo
+            avg_dist = [ a * x + b if x is not None else None for x in avg_dist ]
+            return [
+                mcolors.hsv_to_rgb([x/3, 1, 1]) if x is not None else (.75, .75, .75)
+                for x in avg_dist
+            ]
+        else:
+            return [ (0, 0, 0) ] * len(self.vertices)
+    
+    def edge_speeds(self):
+        speeds = [ ]
+        avg_dist = [self.average_neighbor_distance(w) for w in range(len(self.vertices))]
+        for (u, v) in self.edges:
+            speeds.append((avg_dist[u] + avg_dist[v]) / 2)
+        lo = min(speeds)
+        hi = max(speeds)
+        if hi != lo:
+            a = 1 / (hi - lo)
+            b = -a * lo
+            speeds = [ a * x + b for x in speeds ]
+        else:
+            speeds = [ 0.5 ] * len(self.edges)
+        return speeds
+    
+    def edge_colors(self):
+        return [ mcolors.hsv_to_rgb([x/3, 1, 1]) for x in self.speeds ]
+        
+    def plot(self, axes):
+        axes.clear()
+        # Edges
+        colors = self.edge_colors()
+        for e in range(len(self.edges)):
+            (u, v) = self.edges[e]
+            (x1, y1) = self.vertices[u]
+            (x2, y2) = self.vertices[v]
+            axes.plot([x1, x2], [y1, y2], '-', color=colors[e], zorder=1)
+        # Centroids
+        xc, yc = zip(*self.centroids)
+        axes.plot(xc, yc, 'b+')
+        # Vertices
+        def draw_vertex(i, x, y, edge_color='black'):
+            circle = Circle((x, y), 0.3, color='white', ec=edge_color, linewidth=2)
+            axes.add_patch(circle)
+            axes.text(x, y, str(i), ha='center', va='center', fontsize=10, color='black', zorder=2)
+        colors = self.vertex_colors()
+        for i in range(len(self.vertices)):
+            draw_vertex(i, self.vertices[i][0], self.vertices[i][1], colors[i])
+        # Plot settings
+        axes.set_title(f'Graph: {len(self.centroids)} centroids, '
+            + f'{len(self.vertices)} vertices')
+        axes.set_aspect('equal', adjustable='datalim')
+        plot.draw()
 
 def params(first, last, multipliers):
     list = [ ]
@@ -175,9 +245,9 @@ def params(first, last, multipliers):
 def main():
     graphs = [ ]
     
-    FIRST =  5
+    FIRST =  8
     LAST  = 20
-    MULTS = [1.6, 2.0, 2.4, 2.8, 3.2]
+    MULTS = [1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.6]
     
     for c, v in params(FIRST, LAST, MULTS):
         graph = Graph(c, v)
@@ -185,9 +255,9 @@ def main():
     
     figure, axes = plot.subplots()
     plot.subplots_adjust(bottom = 0.2)
-
+    
     graphs[0].plot(axes)
-
+    
     class Index:
         def __init__(self, length):
             self.index = 0
@@ -201,7 +271,7 @@ def main():
             if self.index > 0:
                 self.index -= 1
                 graphs[self.index].plot(axes)
-
+    
     callback = Index((LAST - FIRST + 1) * len(MULTS))
     axes_prev = plot.axes([0.7, 0.05, 0.1, 0.075])
     axes_next = plot.axes([0.8, 0.05, 0.1, 0.075])
@@ -209,12 +279,12 @@ def main():
     button_next.on_clicked(callback.next)
     button_prev = Button(axes_prev, 'Prev')
     button_prev.on_clicked(callback.prev)
-
+    
     plot.show()
-
+    
 main()
 
 # Do zrobienia:
-#  + rozpoznawanie "śródmiejskich" obszarów
-#  + generowanie prędkości i czasu przejazdu
+#  + generowanie czasu przejazdu
+#  + generowanie zapotrzebowania klientów
 #  + wypisywanie do JSON-a
