@@ -7,6 +7,27 @@ from matplotlib.patches import Circle
 from matplotlib.widgets import Button
 from scipy.spatial import Delaunay
 
+## Exemplary thresholds: [.15, .25, .50, .70, .90]
+##                      -> 30   40   50   70   90  100  km/h
+##
+def quantify_series(data: list[float], thresholds: list[float]) -> list[float]:
+    quant = [0] * (len(thresholds) + 1)
+    for entry in data:
+        for i, th in enumerate(thresholds):
+            if entry < th:
+                quant[i] += 1
+                break
+        else:
+            quant[-1] += 1
+    return quant
+
+def generate_quantities(n_cust=10, n_veh=3, prec=10, load=1000, min_frac=.5, max_frac=.8):
+    quantities = [prec] * n_customers
+    
+    
+    
+    return quantities
+
 class Graph:
     def __init__(self, n_centroids, n_vertices):
         self.centroids = Graph.generate_centroids(n_centroids)
@@ -14,7 +35,6 @@ class Graph:
         self.shift_overlapping_vertices()
         self.edges, faces = Graph.delaunay_triangulation(self.vertices)
         self.reduce_narrow_triangles(faces, 30)
-        self.speeds = self.edge_speeds()
     
     def generate_centroids(count: int) -> list[ tuple[ float, float ] ]:
         # The centroids should be placed in more or less equal angular distances.
@@ -22,7 +42,7 @@ class Graph:
         base = np.random.rand() * math.tau
         centroids = [ ]
         if count > 3:
-            centroids.append( (0, 0) )
+            centroids.append((0, 0))
             count -= 1
         for i in range(count):
             # Generate the phase
@@ -30,14 +50,13 @@ class Graph:
             phase_sdev = angle / 6
             phase = np.random.normal(phase_mean, phase_sdev, 1)[0]
             # Generate the radius
-            RADIUS_MEAN = 10/2
-            RADIUS_SDEV = 10/6
+            RADIUS = 5_000   # in meters
+            RADIUS_MEAN, RADIUS_SDEV = RADIUS/2, RADIUS/6
             radius = np.random.normal(RADIUS_MEAN, RADIUS_SDEV, 1)[0]
-            radius = max(radius,  0)
-            radius = min(radius, 10)
+            radius = max(0, min(radius, RADIUS))
             # Translate to rectangular coordinates
-            x, y = radius * math.cos(phase), radius * math.sin(phase)
-            centroids.append( (x, y) )
+            c = (radius * math.cos(phase), radius * math.sin(phase))
+            centroids.append(c)
         return centroids
     
     def nearest_neighbor_distances(points: list[ tuple[float, float] ]) -> list[float]:
@@ -82,16 +101,16 @@ class Graph:
             n_ver = allocation[c]
             for _ in range(n_ver):
                 ph = np.random.rand() * math.tau
-                MEAN = 0.6 * d
-                SDEV = 0.2 * d
+                MEAN = d/2
+                SDEV = d/6
                 r = np.random.normal(MEAN, SDEV, 1)[0]
                 v = (x_cen + r * math.cos(ph), y_cen + r * math.sin(ph))
                 vertices.append(v)
         return vertices
     
     def shift_overlapping_vertices(self):
-        EPSILON = 0.1
-        EPSILON_SEMIDIAGONAL = 0.5 * EPSILON / math.sqrt(2)
+        MIN_DIST = 100
+        SEMIDIAGONAL = 0.5 * MIN_DIST / math.sqrt(2)
         while True:
             overlaps = [ ]
             for i in range(len(self.vertices)):
@@ -103,8 +122,8 @@ class Graph:
                 break
             for i, j in overlaps:
                 (x1, y1), (x2, y2) = self.vertices[i], self.vertices[j]
-                self.vertices[i] = (x1 - EPSILON_SEMIDIAGONAL, y1 - EPSILON_SEMIDIAGONAL)
-                self.vertices[j] = (x2 + EPSILON_SEMIDIAGONAL, y2 + EPSILON_SEMIDIAGONAL)
+                self.vertices[i] = (x1 - SEMIDIAGONAL, y1 - SEMIDIAGONAL)
+                self.vertices[j] = (x2 + SEMIDIAGONAL, y2 + SEMIDIAGONAL)
     
     def delaunay_triangulation(vertices: list[ tuple[float, float] ]):
         points = np.array(vertices)
@@ -146,20 +165,6 @@ class Graph:
             removables.extend(self.handle_simplex(face))
         self.edges = list(set(self.edges) - set(removables))
     
-    # Well-connected: having at least two neighbors; neither a leaf, nor isolated
-    def is_well_connected(self, vertex):
-        neighbors = set( )
-        for e in self.edges:
-            if e[0] == vertex:
-                neighbors.add(e[1])
-                if len(neighbors) > 1:
-                    return True
-            elif e[1] == vertex:
-                neighbors.add(e[0])
-                if len(neighbors) > 1:
-                    return True
-        return False
-    
     def average_neighbor_distance(self, vertex):
         neighbors = set( )
         for e in self.edges:
@@ -174,11 +179,30 @@ class Graph:
             length += math.hypot(x - x0, y - y0)
         return length / len(neighbors) if len(neighbors) > 0 else None
     
+    def edge_congestions(self):
+        congestion_indices = [ ]
+        avg_dist = [self.average_neighbor_distance(w) for w in range(len(self.vertices))]
+        for (u, v) in self.edges:
+            congestion_indices.append((avg_dist[u] + avg_dist[v]) / 2)
+        lo, hi = min(congestion_indices), max(congestion_indices)
+        if hi != lo:
+            a = 1 / (hi - lo)
+            b = -a * lo
+            congestion_indices = [ a * x + b for x in congestion_indices ]
+        else:
+            congestion_indices = [ 0.5 ] * len(self.edges)
+        return congestion_indices
+    
+    def compute_travel_times(self):
+        self.congestion = self.edge_congestions( )
+    
+    def distribute_orders(self):
+        self.quantities = [ 0 ] * len(self.vertices)
+        
     def vertex_colors(self):
         avg_dist = [self.average_neighbor_distance(i) for i in range(len(self.vertices))]
         avg_dist_valid = [ x for x in avg_dist if x is not None ]
-        lo = min(avg_dist_valid)
-        hi = max(avg_dist_valid)
+        lo, hi = min(avg_dist_valid), max(avg_dist_valid)
         
         if hi != lo:
             a = 1 / (hi - lo)
@@ -191,28 +215,10 @@ class Graph:
         else:
             return [ (0, 0, 0) ] * len(self.vertices)
     
-    def edge_speeds(self):
-        speeds = [ ]
-        avg_dist = [self.average_neighbor_distance(w) for w in range(len(self.vertices))]
-        for (u, v) in self.edges:
-            speeds.append((avg_dist[u] + avg_dist[v]) / 2)
-        lo = min(speeds)
-        hi = max(speeds)
-        if hi != lo:
-            a = 1 / (hi - lo)
-            b = -a * lo
-            speeds = [ a * x + b for x in speeds ]
-        else:
-            speeds = [ 0.5 ] * len(self.edges)
-        return speeds
-    
-    def edge_colors(self):
-        return [ mcolors.hsv_to_rgb([x/3, 1, 1]) for x in self.speeds ]
-        
     def plot(self, axes):
         axes.clear()
         # Edges
-        colors = self.edge_colors()
+        colors = [ mcolors.hsv_to_rgb( [c/3, 1, 1] ) for c in self.congestion ]
         for e in range(len(self.edges)):
             (u, v) = self.edges[e]
             (x1, y1) = self.vertices[u]
@@ -220,26 +226,40 @@ class Graph:
             axes.plot([x1, x2], [y1, y2], '-', color=colors[e], zorder=1)
         # Centroids
         xc, yc = zip(*self.centroids)
-        axes.plot(xc, yc, 'b+')
+        axes.plot(xc, yc, 'c+')
         # Vertices
         def draw_vertex(i, x, y, edge_color='black'):
-            circle = Circle((x, y), 0.3, color='white', ec=edge_color, linewidth=2)
+            circle = Circle((x, y), 100, color='white', ec=edge_color, linewidth=2)
             axes.add_patch(circle)
             axes.text(x, y, str(i), ha='center', va='center', fontsize=10, color='black', zorder=2)
         colors = self.vertex_colors()
         for i in range(len(self.vertices)):
             draw_vertex(i, self.vertices[i][0], self.vertices[i][1], colors[i])
         # Plot settings
-        axes.set_title(f'Graph: {len(self.centroids)} centroids, '
-            + f'{len(self.vertices)} vertices')
+        axes.set_title(f'Graph: {len(self.centroids)} centroids, {len(self.vertices)} vertices')
         axes.set_aspect('equal', adjustable='datalim')
         plot.draw()
+    
+    def dump(self):
+        top = { }
+        top['vertices'] = { }
+        for i, v in enumerate(self.vertices):
+            v_obj = { "x": round(v[0], 3), 
+                      "y": round(v[1], 3),
+                      "q": self.quantities[i] }
+            top['vertices'][str(i)] = v_obj
+        top['edges'] = [ ]
+        for e in self.edges:
+            e_obj = { "u": str(e[0]),
+                      "v": str(e[1]) }
+            top['edges'].append(e_obj)
+        return json.dumps(top, indent=4)
 
 def params(first, last, multipliers):
     list = [ ]
     for c in range(first, last + 1):
         for m in multipliers:
-            list.append((c, int(m*c)))
+            list.append((c, int(m * c)))
     return list
 
 def main():
@@ -251,6 +271,8 @@ def main():
     
     for c, v in params(FIRST, LAST, MULTS):
         graph = Graph(c, v)
+        graph.compute_travel_times( )
+        graph.distribute_orders( )
         graphs.append(graph)
     
     figure, axes = plot.subplots()
@@ -264,21 +286,24 @@ def main():
             self.length = length
         
         def next(self, event):
-            if self.index < self.length - 1:
-                self.index += 1
-                graphs[self.index].plot(axes)
+            self.index = self.index + 1 if self.index < self.length - 1 else 0
+            graphs[self.index].plot(axes)
         def prev(self, event):
-            if self.index > 0:
-                self.index -= 1
-                graphs[self.index].plot(axes)
+            self.index = self.index - 1 if self.index > 0 else self.length - 1
+            graphs[self.index].plot(axes)
+        def dump(self, event):
+            print(graphs[self.index].dump( ))
     
     callback = Index((LAST - FIRST + 1) * len(MULTS))
+    axes_dump = plot.axes([0.6, 0.05, 0.1, 0.075])
     axes_prev = plot.axes([0.7, 0.05, 0.1, 0.075])
     axes_next = plot.axes([0.8, 0.05, 0.1, 0.075])
-    button_next = Button(axes_next, 'Next')
-    button_next.on_clicked(callback.next)
+    button_dump = Button(axes_dump, 'Dump')
+    button_dump.on_clicked(callback.dump)
     button_prev = Button(axes_prev, 'Prev')
     button_prev.on_clicked(callback.prev)
+    button_next = Button(axes_next, 'Next')
+    button_next.on_clicked(callback.next)
     
     plot.show()
     
@@ -287,4 +312,3 @@ main()
 # Do zrobienia:
 #  + generowanie czasu przejazdu
 #  + generowanie zapotrzebowania klientów
-#  + wypisywanie do JSON-a
