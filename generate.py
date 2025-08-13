@@ -10,31 +10,31 @@ from matplotlib.patches import Circle
 from matplotlib.widgets import Button
 from scipy.spatial import Delaunay
 
-def generate_quantities(n_cust=10, n_veh=3, prec=10, load=1000, lo_frac=.5, hi_frac=.8):
-    quantities = [1] * n_cust
-    max_units = n_veh * load / prec - n_cust
-    for _ in range(round(.5 * (lo_frac + hi_frac) * max_units)):
-        quantities[np.random.randint(n_cust)] += 1
-    for i, val in enumerate(quantities):
-        quantities[i] = prec * val
-    return quantities
+class Generator(ABC):
+    @abstractmethod
+    def generate(n_vertices: int) -> list[tuple[float, float]]:
+        pass
 
-class Graph:
-    def __init__(self, n_centroids, n_vertices):
-        self.centroids = Graph.generate_centroids(n_centroids)
-        self.vertices = Graph.generate_vertices(n_vertices, self.centroids)
-        # self.vertices = Graph.generate_vertices(n_vertices)
-        self.shift_overlapping_vertices()
-        self.edges, faces = Graph.delaunay_triangulation(self.vertices)
-        self.reduce_narrow_triangles(faces, 30)
+class OrthogonalGenerator(Generator):
+    def __init__(self, orth_radius):
+        self.orth_radius = orth_radius
     
-    def generate_centroids(count: int) -> list[ tuple[ float, float ] ]:
+    def generate_vertices(n_vertices):
+        vertices = set( )
+        while len(vertices) < n_vertices:
+            x = np.random.randint(-self.orth_radius, self.orth_radius + 1)
+            y = np.random.randint(-self.orth_radius, self.orth_radius + 1)
+            vertices.add((x, y))
+        return list(vertices)
+
+class CentroidGenerator(Generator):
+    def generate_centroids(self, count: int, max_radius=10_000) -> list[ tuple[ float, float ] ]:
         # The centroids should be placed in more or less equal angular distances.
         angle = math.tau / count
         base = np.random.rand() * math.tau
-        centroids = [ ]
+        centroids = set( )
         if count > 3:
-            centroids.append((0, 0))
+            centroids.add((0, 0))
             count -= 1
         for i in range(count):
             # Generate the phase
@@ -42,14 +42,16 @@ class Graph:
             phase_sdev = angle / 6
             phase = np.random.normal(phase_mean, phase_sdev, 1)[0]
             # Generate the radius
-            RADIUS = 10_000   # in meters
-            RADIUS_MEAN, RADIUS_SDEV = RADIUS/2, RADIUS/6
-            radius = np.random.normal(RADIUS_MEAN, RADIUS_SDEV, 1)[0]
-            radius = max(0, min(radius, RADIUS))
+            radius_mean, radius_sdev = max_radius/2, max_radius/6
+            radius = np.random.normal(radius_mean, radius_sdev, 1)[0]
+            radius = max(0, min(radius, max_radius))
             # Translate to rectangular coordinates
             c = (radius * math.cos(phase), radius * math.sin(phase))
-            centroids.append(c)
-        return centroids
+            centroids.add(c)
+        return list(centroids)
+        
+    def __init__(self, n_centroids, max_radius=10_000):
+        self.centroids = self.generate_centroids(n_centroids, max_radius)
     
     def nearest_neighbor_distances(points: list[ tuple[float, float] ]) -> list[float]:
         
@@ -83,39 +85,67 @@ class Graph:
             allocation[index] += 1
         return allocation
     
-    def generate_vertices(count: int, centroids: list[ tuple[float, float] ]) -> list[ tuple[float, float] ]:
-        vertices = [ ]
-        distances = Graph.nearest_neighbor_distances(centroids)
-        allocation = Graph.dhondt_method(count, distances)
-        for c in range(len(centroids)):
-            x_cen, y_cen = centroids[c][0], centroids[c][1]
-            d = distances[c]
-            n_ver = allocation[c]
-            for _ in range(n_ver):
-                ph = np.random.rand() * math.tau
-                MEAN = d/2
-                SDEV = d/6
-                r = np.random.normal(MEAN, SDEV, 1)[0]
-                v = (x_cen + r * math.cos(ph), y_cen + r * math.sin(ph))
-                vertices.append(v)
-        return vertices
-    
-    def shift_overlapping_vertices(self):
-        MIN_DIST = 100
-        SEMIDIAGONAL = 0.5 * MIN_DIST / math.sqrt(2)
+    def shift_overlaps(vertices):
+        min_dist = 1
+        semidiagonal = 0.5 * min_dist / math.sqrt(2)
         while True:
             overlaps = [ ]
-            for i in range(len(self.vertices)):
-                for j in range(i + 1, len(self.vertices)):
-                    (x1, y1), (x2, y2) = self.vertices[i], self.vertices[j]
+            for i in range(len(vertices)):
+                for j in range(i + 1, len(vertices)):
+                    (x1, y1), (x2, y2) = vertices[i], vertices[j]
                     if x1 == x2 and y1 == y2:
                         overlaps.append((i, j))
             if not overlaps:
                 break
             for i, j in overlaps:
-                (x1, y1), (x2, y2) = self.vertices[i], self.vertices[j]
-                self.vertices[i] = (x1 - SEMIDIAGONAL, y1 - SEMIDIAGONAL)
-                self.vertices[j] = (x2 + SEMIDIAGONAL, y2 + SEMIDIAGONAL)
+                (x1, y1), (x2, y2) = vertices[i], vertices[j]
+                vertices[i] = (x1 - semidiagonal, y1 - semidiagonal)
+                vertices[j] = (x2 + semidiagonal, y2 + semidiagonal)
+    
+    def generate(self, n_vertices):
+        vertices = [ ]
+        distances = CentroidGenerator.nearest_neighbor_distances(self.centroids)
+        allocation = CentroidGenerator.dhondt_method(n_vertices, distances)
+        for i, c in enumerate(self.centroids):
+            x_cen, y_cen = c[0], c[1]
+            d = distances[i]
+            n_ver = allocation[i]
+            ver = set( )
+            while len(ver) < n_ver:
+                ph = np.random.rand() * math.tau
+                mean = d/2
+                sdev = d/6
+                r = np.random.normal(mean, sdev, 1)[0]
+                v = (round(x_cen + r * math.cos(ph)), round(y_cen + r * math.sin(ph)))
+                ver.add(v)
+            vertices.extend(ver)
+        CentroidGenerator.shift_overlaps(vertices)
+        return vertices
+
+def generate_quantities(n_cust=10, n_veh=3, prec=10, load=1000, lo_frac=.5, hi_frac=.8):
+    quantities = [1] * n_cust
+    max_units = n_veh * load / prec - n_cust
+    for _ in range(round(.5 * (lo_frac + hi_frac) * max_units)):
+        quantities[np.random.randint(n_cust)] += 1
+    for i, val in enumerate(quantities):
+        quantities[i] = prec * val
+    return quantities
+
+class Graph:
+    def __init__(self, n_vertices, **kwargs):
+        
+        generation = kwargs.get('generation', 'centroid')
+        if generation == 'centroid':
+            self.generator = CentroidGenerator(kwargs['n_centroids'])
+        elif generation == 'orthogonal':
+            self.generator = OrthogonalGenerator(kwargs['orth_radius'])
+        else:
+            raise ValueError('Unknown type of generation')
+        
+        self.vertices = self.generator.generate(n_vertices)
+        
+        self.edges, faces = Graph.delaunay_triangulation(self.vertices)
+        self.reduce_narrow_triangles(faces, 30)
     
     def delaunay_triangulation(vertices: list[ tuple[float, float] ]):
         points = np.array(vertices)
@@ -246,7 +276,7 @@ class Graph:
             (x2, y2) = self.vertices[v]
             axes.plot([x1, x2], [y1, y2], '-', color=colors[e], zorder=1)
         # Centroids
-        xc, yc = zip(*self.centroids)
+        xc, yc = zip(*self.generator.centroids)
         axes.plot(xc, yc, 'c+')
         # Vertices
         def draw_vertex(i, x, y, edge_color='black'):
@@ -257,7 +287,7 @@ class Graph:
         for i in range(len(self.vertices)):
             draw_vertex(i, self.vertices[i][0], self.vertices[i][1], colors[i])
         # Plot settings
-        axes.set_title(f'Graph: {len(self.centroids)} centroids, {len(self.vertices)} vertices')
+        axes.set_title(f'Graph: {len(self.generator.centroids)} centroids, {len(self.vertices)} vertices')
         # axes.set_title(f'Graph: {len(self.vertices)} vertices')
         axes.set_aspect('equal', adjustable='datalim')
         plot.draw( )
@@ -285,7 +315,6 @@ class Graph:
             
         return json.dumps(top, indent=4)
 
-
 def main():
     graphs = [ ]
     
@@ -308,7 +337,7 @@ def main():
         LIMS[i] = lim / 3.6   # m/s
 
     for c, v in params(FIRST, LAST, MULTS):
-        graph = Graph(c, v)
+        graph = Graph(v, n_centroids=c)
         graph.distribute_orders(v // 4)
         graph.compute_travel_times(RUSH, THLD, LIMS)
         graphs.append(graph)
