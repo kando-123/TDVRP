@@ -113,8 +113,8 @@ class CentroidGenerator(Generator):
             ver = set( )
             while len(ver) < n_ver:
                 ph = np.random.rand() * math.tau
-                mean = d/2
-                sdev = d/6
+                mean = d/4
+                sdev = d/12
                 r = np.random.normal(mean, sdev, 1)[0]
                 v = (round(x_cen + r * math.cos(ph)), round(y_cen + r * math.sin(ph)))
                 ver.add(v)
@@ -146,6 +146,8 @@ class Graph:
         
         self.edges, faces = Graph.delaunay_triangulation(self.vertices)
         self.reduce_narrow_triangles(faces, 30)
+        
+        self.depot = kwargs.get('depot', 0)
     
     def delaunay_triangulation(vertices: list[ tuple[float, float] ]):
         points = np.array(vertices)
@@ -279,13 +281,16 @@ class Graph:
         xc, yc = zip(*self.generator.centroids)
         axes.plot(xc, yc, 'c+')
         # Vertices
-        def draw_vertex(i, x, y, edge_color='black'):
-            circle = Circle((x, y), 100, color='white', ec=edge_color, linewidth=2)
+        def draw_vertex(i, edge_color='black'):
+            (x, y) = self.vertices[i]
+            circle = Circle((x, y), 250,
+                color='magenta' if i == int(self.depot) else 'blue' if i in self.orders else 'white',
+                ec=edge_color, linewidth=1)
             axes.add_patch(circle)
-            axes.text(x, y, str(i), ha='center', va='center', fontsize=10, color='black', zorder=2)
+            # axes.text(x, y, str(i), ha='center', va='center', fontsize=10, color='black' if i not in self.orders else 'blue', zorder=2)
         colors = self.vertex_colors()
         for i in range(len(self.vertices)):
-            draw_vertex(i, self.vertices[i][0], self.vertices[i][1], colors[i])
+            draw_vertex(i, colors[i])
         # Plot settings
         axes.set_title(f'Graph: {len(self.generator.centroids)} centroids, {len(self.vertices)} vertices')
         # axes.set_title(f'Graph: {len(self.vertices)} vertices')
@@ -327,7 +332,7 @@ def main():
     
     FIRST = 10
     LAST  = 20
-    MULTS = [2.50, 2.75, 3.00, 3.25, 3.50, 3.75, 4.00]
+    MULTS = [3.00, 3.25, 3.50, 3.75, 4.00, 4.25, 4.50, 4.75, 5.00]
     
     RUSH = [1.0, 0.2, 0.4, 1.0, 0.6, 0.2, 0.0, 0.0]
     THLD = [   .15, .25, .50, .70, .90    ]
@@ -338,7 +343,7 @@ def main():
 
     for c, v in params(FIRST, LAST, MULTS):
         graph = Graph(v, n_centroids=c)
-        graph.distribute_orders(v // 4)
+        graph.distribute_orders(v // 3)
         graph.compute_travel_times(RUSH, THLD, LIMS)
         graphs.append(graph)
     
