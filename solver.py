@@ -26,11 +26,27 @@ class Vertex:
     def join(self, nbor, weights):
         self.nbors[nbor] = weights
     
-    def time(self, nbor, start_time, period=None):
+    def time(self, nbor, start_time, period=None) -> float:
         travel_times = self.nbors[nbor]
         if period is None:
-            period = 86_400 / len(travel_times)    # Assume the list of travel times covers whole day
+            # Assume the list of travel times covers whole day
+            period = 86_400 / len(travel_times)
         return travel_times[int(int(start_time) // int(period))]
+
+class Node:
+    def __init__(self, vertex, order=0):
+        self.vertex = vertex
+        self.order = order
+    def get_vertex(self) -> str:
+        return self.vertex
+    def get_order(self) -> float:
+        return self.order
+    def set_order(self, new_order):
+        self.order = new_order
+    def __str__(self):
+        return f"Node[{self.vertex}:{self.order}]" if self.order else f"Node[{self.vertex}]"
+    def __repr__(self):
+        return self.__str__( )
 
 class Problem:
     def __init__(self, source):
@@ -49,8 +65,8 @@ class Problem:
         self.max_load = fleet['max_load']
         self.depot = data.get('depot', '0')
     
-    def connect(self, start, end, start_time, period=None): # Returns intermediate vertices and time of arrival to the end
-        print(f'start="{start}", end="{end}"')
+    # Returns intermediate vertices and time of arrival to the end
+    def connect(self, start: str, end: str, start_time, period=None):
         if start == end:
             return [ ], start_time
         predecessor  = { start: None }
@@ -64,7 +80,7 @@ class Problem:
                 path = [ ]
                 vertex = predecessor[end]
                 while vertex != start and end is not None:
-                    path.insert(0, vertex)
+                    path.insert(0, Node(vertex))
                     vertex = predecessor[vertex]
                 return path, arrival_time[end]
             visited.add(v)
@@ -80,19 +96,20 @@ class Problem:
                     queue.put((t_nbor, v_nbor))
         raise Exception('The path was not found')
         
-    def fill(self, path, start_time, period=None):
+    def fill(self, path: list[Node], start_time, period=None):
         full_path = [ path[0] ]
         for i in range(1, len(path)):
-            vertices, start_time = self.connect(path[i-1], path[i], start_time, period)
-            full_path.extend(vertices)
+            nodes, start_time = self.connect(path[i-1].get_vertex( ), path[i].get_vertex( ), start_time, period)
+            full_path.extend(nodes)
             full_path.append(path[i])
         return full_path, start_time   # Actually, it's become the end time
     
     def failover_solution(self):
         sol = [ ]
         load = [ ]
+        time = [ ]
         for _ in range(self.n_vehicles):
-            sol.append([self.depot])
+            sol.append([Node(self.depot)])
             load.append(0)
         customer_vertices = PriorityQueue( )   # Greatest order first
         for k, v in self.graph.items( ):
@@ -109,15 +126,20 @@ class Problem:
                 raise Exception('Initial solution generation failed')
             else:
                 load[vehicle] += order
-                sol[vehicle].append(vertex)
-        return sol, load
+                sol[vehicle].append(Node(vertex, order))
+        for path in sol:
+            path.append(self.depot)
+        for i, path in enumerate(sol):
+            sol[i], dur = self.fill(path, 0)
+            time.append(dur)
+        return sol, load, time
     
     def initial_solution(self):
         sol = [ ]
         load = [ ]
         time = [ ]
         for _ in range(self.n_vehicles):
-            sol.append([self.depot])
+            sol.append([Node(self.depot)])
             load.append(0)
         customer_vertices = { k: v.coords for k, v in self.graph.items( ) if v.order > 0 }
         safety_counter = 1000
@@ -127,7 +149,7 @@ class Problem:
             for i in vehicles:
                 path = sol[i]
                 queue = PriorityQueue( )
-                (x0, y0) = self.graph[path[-1]].coords
+                (x0, y0) = self.graph[path[-1].get_vertex( )].coords
                 for key, (x, y) in customer_vertices.items( ):
                     dist = math.hypot(x0 - x, y0 - y)
                     queue.put((dist, key))
@@ -135,20 +157,30 @@ class Problem:
                     _, key = queue.get( )
                     order = self.graph[key].order
                     if load[i] + order <= self.max_load:
-                        path.append(key)
+                        path.append(Node(key, order))
                         load[i] += order
                         del customer_vertices[key]
                         break
             safety_counter -= 1
         if safety_counter > 0:   # The loop ended normally
             for path in sol:
-                path.append(self.depot)
+                path.append(Node(self.depot))
             for i, path in enumerate(sol):
                 sol[i], dur = self.fill(path, 0)
                 time.append(dur)
             return sol, load, time
         else:
             raise Exception('Initial solution generation failed')
+    
+    def evaluate(self, solution, period=None):
+        total_time = 0
+        for path in solution:
+            travel_time = 0
+            for i in range(1, len(path)):
+                u, v = path[i-1].get_vertex( ), path[i].get_vertex( )
+                travel_time += self.graph[u].time(v, travel_time, period)
+            total_time += travel_time
+        return total_time
     
     def neighboring_solution(self, solution):
         raise NotImplementedError( )
@@ -159,24 +191,26 @@ def edge_time(graph, u, v, t0, period=None):
 def main( ):
     problem = Problem(sys.argv[1])
     
-    sol, load, times = problem.initial_solution( )
-    # for _ in range(10):
-    #     try:
-    #         sol, load, times = 
-    #         break
-    #     except:
-    #         pass
-    # else:
-    #     try:
-    #         pass
-    #         sol, load = problem.failover_solution( )
-    #     except:
-    #         print('Failure')
-    #         exit(1)
+    # sol, load, times = problem.initial_solution( )
+    for _ in range(10):
+        try:
+            sol, load, times = problem.initial_solution( )
+            print('break')
+            break
+        except Exception as e:
+            print('exception!')
+            pass
+    else:
+        try:
+            sol, load = problem.failover_solution( )
+        except:
+            print('Failure')
+            exit(1)
     
     print(sol)
     print(load)
     print(times)
+    print(problem.evaluate(sol))
     
     # vertices = { k: (v.x, v.y) for k, v in graph.items( ) if v.q > 0 }
     # clusters = clusterize(vertices, 4)
