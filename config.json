@@ -1,0 +1,56 @@
+{
+	"start_time_s": 18000,
+	"interval_s": 3600,
+	"n_vertices": [ 50, 45, 40 ],
+	"n_examples": [ 20, 15, 10 ],
+	"body": {
+		"type":        "centroid",
+		"n_centroids":         20,
+		"max_radius":       10000
+	},
+	"#body" : {
+		"type":   "orthogonal",
+		"radius":        10000
+	},
+	"min_angle_deg":       15,
+	"orders": {
+		"total":      4000,
+		"n_vehicles":    5,
+		"max_load":   1000,
+		"precision":    10
+	},
+	"weights" : {	
+		"rush_coeff": [
+			0.7,
+			1.0,
+			1.0,
+			0.7,
+			0.3,
+			0.0,
+			0.0,
+			0.0,
+			0.3,
+			0.7,
+			1.0,
+			1.0,
+			0.7,
+			0.3,
+			0.0
+		],
+		"thresholds": [
+			0.15,
+			0.25,
+			0.50,
+			0.70,
+			0.90
+		],
+		"limits_mps": [
+			8.33,
+			11.11,
+			13.89,
+			19.44,
+			25.00,
+			27.78
+		]
+	}
+}
