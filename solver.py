@@ -14,8 +14,14 @@ import json
 import math
 import random
 import sys
-from abc import abstractmethod
 from queue import Queue, PriorityQueue
+
+class Task:
+    graph = None
+    n_vehicles = None
+    max_load = None
+    depot = None
+    interval = None
 
 # Element of the graph
 class Vertex:
@@ -27,21 +33,17 @@ class Vertex:
     def join(self, nbor, weights):
         self.nbors[nbor] = weights
     
-    def time(self, nbor, start_time, interval: int) -> float:
+    def travel_time(self, nbor, start_time) -> float:
         travel_times = self.nbors[nbor]
-        return travel_times[int(int(start_time) // int(interval))]
-
-recent_modification = None
+        return travel_times[int(int(start_time) // int(Task.interval))]
 
 class Cluster:
-    def __init__(self, v_key, task):
+    def __init__(self, v_key):
         self.vertices = [v_key]
-        self.max_load = task.max_load
-        self.graph = task.graph
-        self.load = self.graph[v_key].order
+        self.load = Task.graph[v_key].order
     
     def mergeable(self, cluster) -> bool:
-        return self.load + cluster.load <= self.max_load
+        return self.load + cluster.load <= Task.max_load
     
     def incorporate(self, cluster) -> bool:
         self.vertices.extend(cluster.vertices)
@@ -52,9 +54,9 @@ class Cluster:
     def minimum_metric(lhs, rhs) -> float:
         min_dist = float('inf')
         for k1 in lhs.vertices:
-            (x1, y1) = self.graph[k1].coords
+            (x1, y1) = Task.graph[k1].coords
             for k2 in rhs.vertices:
-                (x2, y2) = self.graph[k2].coords
+                (x2, y2) = Task.graph[k2].coords
                 dist = math.hypot(x2 - x1, y2 - y1)
                 if dist < min_dist:
                     min_dist = dist
@@ -63,9 +65,9 @@ class Cluster:
     def maximum_metric(lhs, rhs) -> float:
         max_dist = float('-inf')
         for k1 in lhs.vertices:
-            (x1, y1) = lhs.graph[k1].coords
+            (x1, y1) = Task.graph[k1].coords
             for k2 in rhs.vertices:
-                (x2, y2) = rhs.graph[k2].coords
+                (x2, y2) = Task.graph[k2].coords
                 dist = math.hypot(x2 - x1, y2 - y1)
                 if dist > max_dist:
                     max_dist = dist
@@ -74,14 +76,14 @@ class Cluster:
     def centroid_metric(lhs, rhs) -> float:
         (x1, y1) = (0, 0)
         for k1 in lhs.vertices:
-            (x, y) = self.graph[k1].coords
+            (x, y) = Task.graph[k1].coords
             x1 += x
             y1 += y
         x1 /= len(lhs.vertices)
         y1 /= len(lhs.vertices)
         (x2, y2) = (0, 0)
         for k2 in lhs.vertices:
-            (x, y) = self.graph[k1].coords
+            (x, y) = Task.graph[k1].coords
             x2 += x
             y2 += y
         x2 /= len(rhs.vertices)
@@ -91,16 +93,16 @@ class Cluster:
     def weighted_metric(lhs, rhs) -> float:
         (x1, y1) = (0, 0)
         for k in lhs.vertices:
-            (x, y) = self.graph[k].coords
-            q = self.graph[k].order
+            (x, y) = Task.graph[k].coords
+            q = Task.graph[k].order
             x1 += x * q
             y1 += y * q
         x1 /= len(lhs.load)
         y1 /= len(lhs.load)
         (x2, y2) = (0, 0)
         for k in lhs.vertices:
-            (x, y) = self.graph[k].coords
-            q = self.graph[k].order
+            (x, y) = Task.graph[k].coords
+            q = Task.graph[k].order
             x2 += x * q
             y2 += y * q
         x2 /= len(rhs.load)
@@ -124,26 +126,26 @@ class Cluster:
     def distance(self, other) -> float:
         return Cluster.metric(self, other)
 
-class Task:
-    def __init__(self, source):
-        with open(source, 'r') as file:
-            data = json.load(file)
-        self.graph = dict( )
-        for key, val in data["vertices"].items( ):
-            coords = (val["x"], val["y"])
-            order = val["q"]
-            self.graph[key] = Vertex(coords, order)
-        for edge in data["edges"]:
-            u, v, w = edge["u"], edge["v"], edge["w"]
-            self.graph[u].join(v, w)
-        fleet = data["fleet"]
-        self.n_vehicles = fleet["n_vehicles"]
-        self.max_load = fleet["max_load"]
-        self.depot = data.get("depot", "0")
-        self.interval = data["interval"]
+def init(source):
+    Task.graph = dict( )
+    with open(source, 'r') as file:
+        data = json.load(file)
+    for key, val in data["vertices"].items( ):
+        coords = (val["x"], val["y"])
+        order = val["q"]
+        Task.graph[key] = Vertex(coords, order)
+    for edge in data["edges"]:
+        u, v, w = edge["u"], edge["v"], edge["w"]
+        Task.graph[u].join(v, w)
+    fleet = data["fleet"]
     
-    # Returns intermediate nodes and time of arrival to the end
-    def connect(self, start: str, end: str, start_time):
+    Task.n_vehicles = fleet["n_vehicles"]
+    Task.max_load   = fleet["max_load"]
+    Task.depot      = data.get("depot", "0")
+    Task.interval   = data["interval"]
+
+class Path:
+    def find_intermediate_vertices(start: str, end: str, start_time):
         if start == end:
             return [ ], start_time
         predecessor  = { start: None }
@@ -162,9 +164,9 @@ class Task:
                 return path, arrival_time[end]
             visited.add(v)
             t = arrival_time[v]
-            for v_nbor in self.graph[v].nbors:
+            for v_nbor in Task.graph[v].nbors:
                 if v_nbor not in visited:
-                    t_nbor = t + self.graph[v].time(v_nbor, t, self.interval)
+                    t_nbor = t + Task.graph[v].travel_time(v_nbor, t)
                     if t_nbor < arrival_time.get(v_nbor, math.inf):
                         predecessor[v_nbor] = v
                         arrival_time[v_nbor] = t_nbor
@@ -173,286 +175,289 @@ class Task:
                     queue.put((t_nbor, v_nbor))
         raise Exception('The path was not found')
     
-    # Connects successive customers on the path
-    def fill(self, path: list[tuple[str, float]], start_time):
-        full_path = [ path[0] ]
-        for i in range(1, len(path)):
-            nodes, start_time = self.connect(path[i-1][0], path[i][0], start_time)
-            full_path.extend(nodes)
-            full_path.append(path[i])
-        return full_path, start_time   # Actually, it's become the end time :) 
+    def connect(nodes: list[tuple[str, float]], start_time):
+        full_path = [nodes[0]]
+        for i in range(1, len(nodes)):
+            intermediates, start_time = Path.find_intermediate_vertices(nodes[i-1][0], nodes[i][0], start_time)
+            full_path.extend(intermediates)
+            full_path.append(nodes[i])
+        return full_path
     
-    def clusterization_solution(self):
-        clusters = [ Cluster(key, self) for key in self.graph if key != self.depot ]
-        while len(clusters) > self.n_vehicles:
-            # Queue will store pairs (i, j) of clusters, i < j,
-            #     from the least distant to the most
-            queue = PriorityQueue( )
-            for i in range(0, len(clusters)):
-                c1 = clusters[i]
-                for j in range(i + 1, len(clusters)):
-                    c2 = clusters[j]
-                    entry = c1.distance(c2), (i, j)
-                    queue.put(entry)
-            # Merge the two closest clusters,
-            #    on condition they will not exceed the max load
-            while not queue.empty( ):
-                _, (i, j) = queue.get( )
-                c1 = clusters[i]
-                c2 = clusters[j]
-                if c1.mergeable(c2):
-                    c1.incorporate(c2)
-                    clusters.pop(j)
-                    break
-            else:
-                raise Exception('Clusterization failed!')
-        # Transform the clusters into paths
-        paths = [ ]
-        loads = [ ]
-        times = [ ]
-        for cluster in clusters:
-            path = [ (self.depot, 0) ]
-            while len(cluster.vertices) > 0:
-                (x0, y0) = self.graph[path[-1][0]].coords
-                min_dist, min_idx = float('inf'), None
-                for idx, vtx in enumerate(cluster.vertices):
-                    (x1, y1) = self.graph[vtx].coords
-                    dist = math.hypot(x1 - x0, y1 - y0)
-                    if dist < min_dist:
-                        min_dist = dist
-                        min_idx = idx
-                next = cluster.vertices.pop(min_idx)
-                node = (next, self.graph[next].order)
-                path.append(node)
-            path.append((self.depot, 0))
-            path, time = self.fill(path, 0)
-            paths.append(path)
-            loads.append(cluster.load)
-            times.append(time)
-        return paths, loads, times
+    def __init__(self, vertices: list[str]):
+        self.nodes = Path.connect([(v, Task.graph[v].order) for v in vertices], 0)
     
-    def greedy_solution(self):
-        sol = [ ]
-        load = [ ]
-        time = [ ]
-        for _ in range(self.n_vehicles):
-            sol.append([(self.depot, 0)])
-            load.append(0)
-        vertices = { k: v.coords for k, v in self.graph.items( ) if k != self.depot }
-        counter = 1000
-        while len(vertices) > 0 and counter:
-            vehicles = list(range(self.n_vehicles))
-            random.shuffle(vehicles)
-            for i in vehicles:
-                path = sol[i]
-                queue = PriorityQueue( )
-                (x0, y0) = self.graph[path[-1][0]].coords
-                for key, (x, y) in vertices.items( ):
-                    dist = math.hypot(x0 - x, y0 - y)
-                    queue.put((dist, key))
-                while not queue.empty( ):
-                    _, key = queue.get( )
-                    order = self.graph[key].order
-                    if load[i] + order <= self.max_load:
-                        path.append((key, order))
-                        load[i] += order
-                        del vertices[key]
-                        break
-            counter -= 1
-        if counter > 0:   # The loop ended normally
-            for path in sol:
-                path.append((self.depot, 0))
-            for i, path in enumerate(sol):
-                sol[i], dur = self.fill(path, 0)
-                time.append(dur)
-            return sol, load, time
+    def extract_customers(self):
+        return [ node for node in self.nodes if node[1] > 0 ]
+    
+    def copy(self):
+        vertices = [Task.depot] + [vtx for vtx, ord in self.extract_customers( )] + [Task.depot]
+        return Path(vertices)
+    
+    def load(self):
+        return sum([Task.graph[vtx].order for vtx, ord in self.nodes])
+    
+    def travel_time(self):
+        time = 0
+        for i in range(1, len(self.nodes)):
+            prev = self.nodes[i-1][0]
+            next = self.nodes[ i ][0]
+            time += Task.graph[prev].travel_time(next, time)
+        return time
+    
+    # ----- Internal Modifications ----- #
+    
+    def shuffle(self, length):
+        customers = self.extract_customers( )
+        if length < len(customers):
+            first = random.randint(0, len(customers) - length)
+            last = first + length
+            slice = customers[first:last]
+            random.shuffle(slice)
+            if len(slice) > 1:
+                i = 5
+                while slice == customers[first:last] and i > 0:
+                    random.shuffle(slice)
+                    i -= 1
+            customers = customers[0:first] + slice + customers[last:]
+            customers.insert(0, (Task.depot, 0))
+            customers.append((Task.depot, 0))
+            self.nodes = Path.connect(customers, 0)
         else:
-            raise Exception('Initial solution generation failed')
+            random.shuffle(self.nodes)
     
-    def failover_solution(self):
-        sol = [ ]
-        load = [ ]
-        time = [ ]
-        for _ in range(self.n_vehicles):
-            sol.append( [ (self.depot, 0) ] )
-            load.append(0)
-        vertices = PriorityQueue( )   # Greatest order first
-        for k, v in self.graph.items( ):
-            if k != self.depot:
-                vertices.put((-v.order, k))
-        while not vertices.empty( ):
-            _, vertex = vertices.get( )
-            order = self.graph[vertex].order
-            vehicles = PriorityQueue( )
-            for i in range(self.n_vehicles):
-                vehicles.put( (load[i], i) )   # Least loaded first
-            _, vehicle = vehicles.get( )
-            if load[vehicle] + order > self.max_load:
-                raise Exception('Initial solution generation failed')
-            else:
-                load[vehicle] += order
-                sol[vehicle].append((vertex, order))
-        for path in sol:
-            path.append((self.depot, 0))
-        for i, path in enumerate(sol):
-            sol[i], dur = self.fill(path, 0)
-            time.append(dur)
-        return sol, load, time
+    def reverse(self, length):
+        customers = self.extract_customers( )
+        if length < len(customers):
+            first = random.randint(0, len(customers) - length)
+            last = first + length
+            slice = customers[first:last]
+            slice.reverse( )
+            customers = customers[:first] + slice + customers[last:]
+            customers.insert(0, (Task.depot, 0))
+            customers.append((Task.depot, 0))
+            self.nodes = Path.connect(customers, 0)
+        else:
+            self.nodes.reverse( )
     
-    def evaluate_path(self, path):
-        travel_time = 0
-        for i in range(1, len(path)):
-            u, v = path[i-1][0], path[i][0]
-            travel_time += self.graph[u].time(v, travel_time, self.interval)
-        return travel_time
+    def move(self, length=1):
+        customers = self.extract_customers( )
+        if length < len(customers):
+            first = random.randint(0, len(customers) - length)
+            last = first + length
+            sublist = customers[first:last]
+            del customers[first:last]
+            index = random.randrange(1, len(customers))
+            if index == first:
+                index = 0
+            customers[index:index] = sublist
+            customers.insert(0, (Task.depot, 0))
+            customers.append((Task.depot, 0))
+            self.nodes = Path.connect(customers, 0)
+
+    # ----- Mutual Modifications ----- #
     
-    def evaluate_solution(self, solution):
-        total_time = 0
-        for path in solution:
-            total_time += self.evaluate_path(path)
-        return total_time
+    # The mutual modifications rely on extracting sequences of nodes (in particular, single nodes)
+    # from one list and inserting them to others.
     
-    def extract_customers(path):
-        return [ node for node in path if node[1] > 0 ]
-    
-    # Swap two customers on the path
-    def swap(self, path: list[tuple[str, float]]):
-        customers = Task.extract_customers(path)
-        node_idx1 = random.randrange(0, len(customers))
-        node_idx2 = random.randrange(1, len(customers))
-        if node_idx1 == node_idx2:
-            node_idx2 = 0
-        customers[node_idx1], customers[node_idx2] = customers[node_idx2], customers[node_idx1]
-        # Add the depot at the endpoints
-        customers.insert(0, (self.depot, 0))
-        customers.append((self.depot, 0))
-        path, _ = self.fill(customers, 0)
-        return path
-    
-    # Exchange customers between two paths
-    def exchange(self, path1: list[tuple[str, float]], path2: list[tuple[str, float]]):
-        customers1 = Task.extract_customers(path1)
-        customers2 = Task.extract_customers(path2)
-        node_idx1 = random.randrange(0, len(customers1))
-        node_idx2 = random.randrange(0, len(customers2))
-        customers1[node_idx1], customers2[node_idx2] = customers2[node_idx2], customers1[node_idx1]
-        # Add the depot at the endpoints
-        customers1.insert(0, (self.depot, 0))
-        customers1.append((self.depot, 0))
-        customers2.insert(0, (self.depot, 0))
-        customers2.append((self.depot, 0))
-        path1, _ = self.fill(customers1, 0)
-        path2, _ = self.fill(customers2, 0)
-        return path1, path2
-        # To do: pay attention to max load!
-    
-    # Move a customer within the path
-    def move(self, path: list[tuple[str, float]]):
-        customers = Task.extract_customers(path)
-        node_idx1 = random.randrange(0, len(customers))
-        node = customers.pop(node_idx1)
-        node_idx2 = random.randrange(1, len(customers))
-        if node_idx1 == node_idx2:
-            node_idx2 = 0
-        customers.insert(node_idx2, node)
-        # Add the depot at the endpoints
-        customers.insert(0, (self.depot, 0))
-        customers.append((self.depot, 0))
-        path, _ = self.fill(customers, 0)
-        return path
-    
-    # Transfer a customer to another path
-    def transfer(self, path1: list[tuple[str, float]], path2: list[tuple[str, float]]):
-        customers1 = Task.extract_customers(path1)
-        customers2 = Task.extract_customers(path2)
-        node_idx1 = random.randrange(0, len(customers1))
-        node = customers1.pop(node_idx1)
-        node_idx2 = random.randrange(0, len(customers2))   # How about selecting the closest path?
-        customers2.insert(node_idx2, node)
-        # Add the depot at the endpoints
-        customers1.insert(0, (self.depot, 0))
-        customers1.append((self.depot, 0))
-        customers2.insert(0, (self.depot, 0))
-        customers2.append((self.depot, 0))
-        path1, _ = self.fill(customers1, 0)
-        path2, _ = self.fill(customers2, 0)
-        return path1, path2
-    
-    # Reverse a range of customers
-    def reverse(self):
+    # Removes the 
+    def remove(self, length=1) -> tuple[list[str], float]:
         pass
-    
-    def neighboring_solution(self, solution):
-        copy = [ path[:] for path in solution ]   # Deep copy (one-level deep, but that's deep enough)
-        [strategy] = random.choices(['swap', 'exchange', 'move', 'transfer'],
-            weights=[1, 3, 1, 7], k=1)
-        if strategy == 'swap':
-            idx = random.randrange(len(copy))
-            copy[idx] = self.swap(copy[idx])
-        elif strategy == 'exchange':
-            idx1, idx2 = random.randrange(0, len(copy)), random.randrange(1, len(copy))
-            if idx1 == idx2:
-                idx2 = 0
-            path1, path2 = self.exchange(copy[idx1], copy[idx2])
-            copy[idx1] = path1
-            copy[idx2] = path2
-        elif strategy == 'move':
-            idx = random.randrange(0, len(copy))
-            copy[idx] = self.move(copy[idx])
-        elif strategy == 'transfer':
-            idx1, idx2 = random.randrange(0, len(copy)), random.randrange(1, len(copy))
-            if idx1 == idx2:
-                idx2 = 0
-            path1, path2 = self.transfer(copy[idx1], copy[idx2])
-            copy[idx1] = path1
-            copy[idx2] = path2
+
+def clusterization_solution( ):
+    clusters = [ Cluster(key) for key in Task.graph if key != Task.depot ]
+    while len(clusters) > Task.n_vehicles:
+        # Queue will store pairs (i, j) of clusters, i < j,
+        #     from the least distant to the most
+        queue = PriorityQueue( )
+        for i in range(0, len(clusters)):
+            c1 = clusters[i]
+            for j in range(i + 1, len(clusters)):
+                c2 = clusters[j]
+                entry = c1.distance(c2), (i, j)
+                queue.put(entry)
+        # Merge the two closest clusters,
+        #    on condition they will not exceed the max load
+        while not queue.empty( ):
+            _, (i, j) = queue.get( )
+            c1 = clusters[i]
+            c2 = clusters[j]
+            if c1.mergeable(c2):
+                c1.incorporate(c2)
+                clusters.pop(j)
+                break
         else:
-            raise Exception('Something weird has happened')
-        global recent_modification
-        recent_modification = strategy
-        return copy
-    
-    def edge_time(u, v, t0):
-        return self.graph[u].time(v, t0, self.interval)
+            raise Exception('Clusterization failed!')
+    # Transform the clusters into paths
+    paths = [ ]
+    loads = [ ]
+    times = [ ]
+    for cluster in clusters:
+        customers = [ Task.depot ]
+        while len(cluster.vertices) > 0:
+            (x0, y0) = Task.graph[customers[-1][0]].coords
+            min_dist, min_idx = float('inf'), None
+            for idx, vtx in enumerate(cluster.vertices):
+                (x1, y1) = Task.graph[vtx].coords
+                dist = math.hypot(x1 - x0, y1 - y0)
+                if dist < min_dist:
+                    min_dist = dist
+                    min_idx = idx
+            next = cluster.vertices.pop(min_idx)
+            customers.append(next)
+        customers.append(Task.depot)
+        path = Path(customers)
+        paths.append(path)
+        loads.append(path.load( ))
+        times.append(path.travel_time( ))
+    return paths, loads, times
+
+# def greedy_solution( ):
+#     paths = [ ]
+#     loads = [ ]
+#     times = [ ]
+#     for _ in range(Task.n_vehicles):
+#         paths.append([(Task.depot, 0)])
+#         loads.append(0)
+#     vertices = { k: v.coords for k, v in Task.graph.items( ) if k != Task.depot }
+#     counter = 1000
+#     while len(vertices) > 0 and counter:
+#         vehicles = list(range(Task.n_vehicles))
+#         random.shuffle(vehicles)
+#         for i in vehicles:
+#             path = paths[i]
+#             queue = PriorityQueue( )
+#             (x0, y0) = Task.graph[path[-1][0]].coords
+#             for key, (x, y) in vertices.items( ):
+#                 dist = math.hypot(x0 - x, y0 - y)
+#                 queue.put((dist, key))
+#             while not queue.empty( ):
+#                 _, key = queue.get( )
+#                 order = Task.graph[key].order
+#                 if loads[i] + order <= Task.max_load:
+#                     paths.append((key, order))
+#                     loads[i] += order
+#                     del vertices[key]
+#                     break
+#         counter -= 1
+#     if counter > 0:   # The loop ended normally
+#         for path in paths:
+#             path.append((Task.depot, 0))
+#         for i, path in enumerate(paths):
+#             paths[i] = Path(path)
+#             time.append(paths[i].travel_time( ))
+#         return paths, load, time
+#     else:
+#         raise Exception('Initial solution generation failed')
+# 
+# def failover_solution( ):
+#     paths = [ ]
+#     loads = [ ]
+#     times = [ ]
+#     for _ in range(Task.n_vehicles):
+#         paths.append( [ (Task.depot, 0) ] )
+#         loads.append(0)
+#     vertices = PriorityQueue( )   # Greatest order first
+#     for k, v in Task.graph.items( ):
+#         if k != Task.depot:
+#             vertices.put((-v.order, k))
+#     while not vertices.empty( ):
+#         _, vertex = vertices.get( )
+#         order = Task.graph[vertex].order
+#         vehicles = PriorityQueue( )
+#         for i in range(Task.n_vehicles):
+#             vehicles.put((load[i], i))   # Least loaded first
+#         _, vehicle = vehicles.get( )
+#         if loads[vehicle] + order > Task.max_load:
+#             raise Exception('Initial solution generation failed')
+#         else:
+#             loads[vehicle] += order
+#             paths[vehicle].append((vertex, order))
+#     for path in sol:
+#         path.append((Task.depot, 0))
+#     for i, path in enumerate(sol):
+#         paths[i] = Path(path)
+#         time.append(paths[i].travel_time( ))
+#     return paths, load, time
+
+def evaluate_solution(solution: list[Path]):
+    total_time = 0
+    for path in solution:
+        total_time += path.travel_time( )
+    return total_time
+
+def neighboring_solution(solution):
+    new_solution = None
+    [strategy] = random.choices(['shuffle', 'reverse', 'move'], k=1)
+    if strategy == 'shuffle':
+        index = random.randrange(len(solution))
+        copy = solution[index].copy( )
+        copy.shuffle(random.randint(3, 5))
+        new_solution = [ ]
+        for i, path in enumerate(solution):
+            new_solution.append(copy if i == index else path)
+    elif strategy == 'reverse':
+        index = random.randrange(len(solution))
+        copy = solution[index].copy( )
+        copy.reverse(random.randint(2, 4))
+        new_solution = [ ]
+        for i, path in enumerate(solution):
+            new_solution.append(copy if i == index else path)
+    elif strategy == 'move':
+        index = random.randrange(len(solution))
+        copy = solution[index].copy( )
+        copy.move(random.randint(1, 3))
+        new_solution = [ ]
+        for i, path in enumerate(solution):
+            new_solution.append(copy if i == index else path)
+    else:
+        raise Exception('Something weird has happened')
+    global recent_modification
+    recent_modification = strategy
+    return new_solution
+
+def edge_time(u, v, t0):
+    return Task.graph[u].travel_time(v, t0)
 
 def main( ):
-    task = Task(sys.argv[1])
+    init(sys.argv[1])
     
-    paths, loads, times = None, None, None
-    
-    try:
-        paths, loads, times = task.clusterization_solution( )
-    except:
-        for _ in range(10):
-            try:
-                paths, loads, times = task.greedy_solution( )
-                print('break')
-                break
-            except Exception as e:
-                print(e)
-                print('exception!')
-                pass
-        else:
-            try:
-                paths, loads, times = task.failover_solution( )
-            except:
-                print('Failure')
-                exit(1)
+    # paths, loads, times = None, None, None
+    # 
+    # try:
+    #     paths, loads, times = clusterization_solution( )
+    # except:
+    #     for _ in range(10):
+    #         try:
+    #             paths, loads, times = greedy_solution( )
+    #             print('break')
+    #             break
+    #         except Exception as e:
+    #             print(e)
+    #             print('exception!')
+    #             pass
+    #     else:
+    #         try:
+    #             paths, loads, times = failover_solution( )
+    #         except:
+    #             print('Failure')
+    #             exit(1)
     
     # The algorithm for determining the initial solution can be upgraded later.
     # Nevertheless, at this point there is SOME initial solution to start with.
     
-    N_ITER = 10_000
-    TEMP   =    100
-    best_sol, best_eval = paths, task.evaluate_solution(paths)
+    paths, loads, times = clusterization_solution( )
+    
+    N_ITER = 100
+    TEMP   = 100
+    best_sol, best_eval = paths, evaluate_solution(paths)
     curr_sol, curr_eval = best_sol, best_eval
     scores = [best_eval]
     
     for i in range(N_ITER):
         t = TEMP / float(i + 1)
         
-        cand_sol  = task.neighboring_solution(paths)
-        cand_eval = task.evaluate_solution(cand_sol)
+        cand_sol  = neighboring_solution(paths)
+        cand_eval = evaluate_solution(cand_sol)
         
         if cand_eval < best_eval or random.random( ) < math.exp((curr_eval - cand_eval) / t):
             curr_sol, curr_eval = cand_sol, cand_eval
@@ -464,7 +469,7 @@ def main( ):
         if i % 100 == 0:
             print(f"Iteration {i}")
     
-    best_sol = [ [ list(node) for node in path ] for path in best_sol ]
+    best_sol = [ [ list(node) for node in path.nodes ] for path in best_sol ]
     print(best_sol)
     print(best_eval)
     
