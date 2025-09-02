@@ -259,9 +259,56 @@ class Path:
     # The mutual modifications rely on extracting sequences of nodes (in particular, single nodes)
     # from one list and inserting them to others.
     
-    # Removes the 
-    def remove(self, length=1) -> tuple[list[str], float]:
-        pass
+    def remove(self, length=1):
+        customers = self.extract_customers( )
+        if length < len(customers):
+            first = random.randint(0, len(customers) - length)
+            last = first + length
+            sublist = customers[first:last]
+            del customers[first:last]
+            customers.insert(0, (Task.depot, 0))
+            customers.append((Task.depot, 0))
+            self.nodes = Path.connect(customers, 0)
+            return sublist
+        else:
+            return None
+    
+    def insertable(self, new_customers: list[tuple[str, float]]):
+        return self.load() + sum([ord for vtx, ord in new_customers]) <= Task.max_load
+    
+    def distance(self, new_customers: list[tuple[str, float]]):
+        customers = self.extract_customers( )
+        cumulative_distance = 0
+        for new_vertex, new_order in new_customers:
+            (x0, y0) = Task.graph[new_vertex].coords
+            min_dist, min_index = float('inf'), None
+            for index in range(1, len(customers)):
+                prev, _ = customers[index-1]
+                next, _ = customers[index]
+                (x1, y1) = Task.graph[prev].coords
+                (x2, y2) = Task.graph[next].coords
+                dist = math.hypot(x1 - x0, y1 - y0) + math.hypot(x2 - x0, y2 - y0)
+                if dist < min_dist:
+                    min_dist = dist
+                    min_index = index
+            cumulative_distance += min_dist
+        return cumulative_distance
+    
+    def insert(self, new_customers: list[tuple[str, float]]):
+        customers = self.extract_customers( )
+        for new_vertex, new_order in new_customers:
+            (x0, y0) = Task.graph[new_vertex].coords
+            min_dist, min_index = float('inf'), None
+            for index in range(1, len(customers)):
+                prev, _ = customers[index-1]
+                next, _ = customers[index]
+                (x1, y1) = Task.graph[prev].coords
+                (x2, y2) = Task.graph[next].coords
+                dist = math.hypot(x1 - x0, y1 - y0) + math.hypot(x2 - x0, y2 - y0)
+                if dist < min_dist:
+                    min_dist = dist
+                    min_index = index
+            customers.insert(min_index, (new_vertex, new_order))
 
 def clusterization_solution( ):
     clusters = [ Cluster(key) for key in Task.graph if key != Task.depot ]
@@ -387,7 +434,7 @@ def evaluate_solution(solution: list[Path]):
 
 def neighboring_solution(solution):
     new_solution = None
-    [strategy] = random.choices(['shuffle', 'reverse', 'move'], k=1)
+    [strategy] = random.choices(['shuffle', 'reverse', 'move', 'transfer'], k=1)
     if strategy == 'shuffle':
         index = random.randrange(len(solution))
         copy = solution[index].copy( )
@@ -409,10 +456,63 @@ def neighboring_solution(solution):
         new_solution = [ ]
         for i, path in enumerate(solution):
             new_solution.append(copy if i == index else path)
+    elif strategy == 'transfer':
+        # index = random.randrange(len(solution))
+        # copy1 = solution[index].copy( )
+        # sequence = copy1.remove(random.randint(1, 4))
+        # min_dist, min_index = float('inf'), None
+        # for i, path in enumerate(solution):
+        #     if i == index:
+        #         continue
+        #     if path.insertable(sequence) and (dist := path.distance(sequence)) < min_dist:
+        #         min_dist = dist
+        #         min_index = i
+        # if min_index is not None:
+        #     copy2 = solution[min_index].copy( )
+        #     copy2.insert(sequence)
+        #     new_solution = [ ]
+        #     for i, path in enumerate(solution):
+        #         if i == index:
+        #             new_solution.append(copy1)
+        #         elif i == min_index:
+        #             new_solution.append(copy2)
+        #         else:
+        #             new_solution.append(path)
+        # else:
+        #     new_solution = solution   # To do: try to swap
+        index1 = random.randrange(0, len(solution))
+        copy1 = solution[index1].copy( )
+        sequence = copy1.remove(random.randint(1, 4))
+        
+        indexes = list(range(len(solution)))
+        indexes.remove(index1)
+        random.shuffle(indexes)
+        for index in indexes:
+            if solution[index].insertable(sequence):
+                copy2 = solution[index2 := index].copy( )
+                break
+        else:
+            index2, copy2 = None, None   # Cannot fit anywhere!
+        
+        if copy2 is not None:
+            copy2.insert(sequence)
+            
+            new_solution = [ ]
+            for i, path in enumerate(solution):
+                if i == index1:
+                    new_solution.append(copy1)
+                elif i == index2:
+                    new_solution.append(copy2)
+                else:
+                    new_solution.append(path)
+        else:
+            new_solution = solution   # Temporary
     else:
         raise Exception('Something weird has happened')
+    
     global recent_modification
     recent_modification = strategy
+    
     return new_solution
 
 def edge_time(u, v, t0):
@@ -442,35 +542,32 @@ def main( ):
     #             print('Failure')
     #             exit(1)
     
-    # The algorithm for determining the initial solution can be upgraded later.
-    # Nevertheless, at this point there is SOME initial solution to start with.
-    
     paths, loads, times = clusterization_solution( )
     
-    N_ITER = 100
-    TEMP   = 100
-    best_sol, best_eval = paths, evaluate_solution(paths)
-    curr_sol, curr_eval = best_sol, best_eval
-    scores = [best_eval]
+    N_ITER = 20000
+    TEMP   =   100
+    best, best_cost = paths, evaluate_solution(paths)
+    current, current_cost = best, best_cost
     
-    for i in range(N_ITER):
-        t = TEMP / float(i + 1)
+    for i in range(1, N_ITER + 1):
+        # t = TEMP / float(i + 1)
+        # t = TEMP - 0.01 * i
+        t = TEMP / math.log(1 + i)
         
-        cand_sol  = neighboring_solution(paths)
-        cand_eval = evaluate_solution(cand_sol)
+        candidate      = neighboring_solution(paths)
+        candidate_cost = evaluate_solution(candidate)
         
-        if cand_eval < best_eval or random.random( ) < math.exp((curr_eval - cand_eval) / t):
-            curr_sol, curr_eval = cand_sol, cand_eval
-            if cand_eval < best_eval:
+        if (better := candidate_cost < best_cost) or random.random( ) < math.exp((current_cost - candidate_cost) / t):
+            current, current_cost = candidate, candidate_cost
+            if better:
                 print(f'Upgrade, {recent_modification}!')
-                best, best_eval = cand_sol, cand_eval
-                scores.append(best_eval)
+                best, best_cost = candidate, candidate_cost
         
         if i % 100 == 0:
-            print(f"Iteration {i}")
+            print(f"Iteration {i}, temperature: {t:.3f}")
     
-    best_sol = [ [ list(node) for node in path.nodes ] for path in best_sol ]
-    print(best_sol)
-    print(best_eval)
+    best = [ [ list(node) for node in path.nodes ] for path in best ]
+    print(best)
+    print(best_cost)
     
 main( )
