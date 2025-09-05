@@ -1,23 +1,23 @@
 {
 	"start_time_s": 18000,
 	"interval_s": 3600,
-	"n_vertices": [ 50, 45, 40 ],
-	"n_examples": [ 20, 15, 10 ],
+	"n_vertices": [ 75, 100, 125 ],
+	"n_examples": [ 10,  15,  20 ],
 	"body": {
 		"type":        "centroid",
-		"n_centroids":         20,
-		"max_radius":       10000
+		"n_centroids":  [   1,    4,     9],
+		"radius":       [4000, 8000, 12000]
 	},
 	"#body" : {
-		"type":   "orthogonal",
-		"radius":        10000
+		"type":      "orthogonal",
+		"radius":           10000
 	},
-	"min_angle_deg":       15,
+	"min_angle_deg":           15,
 	"orders": {
-		"total":      4000,
-		"n_vehicles":    5,
-		"max_load":   1000,
-		"precision":    10
+		"total":             5250,
+		"n_vehicles":           7,
+		"max_load":          1000,
+		"precision":           10
 	},
 	"weights" : {	
 		"rush_coeff": [

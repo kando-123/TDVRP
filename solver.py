@@ -1,15 +1,3 @@
-# Load the graph.
-# Determine the initial solution.
-# In a loop:
-#     Determine a neighboring solution
-#     Compare
-#     Swap conditionally
-#
-# Determine a neighboring solution:
-#     (1) The change must produce a valid path
-#     (2) If a customer node is being included, it must be also excluded from another path.
-#         * Actually, it should NOT be forbidden to pass through a customer vertex without servicing it.
-
 import json
 import math
 import random
@@ -22,7 +10,7 @@ class Task:
     max_load = None
     depot = None
     interval = None
-
+    
 # Element of the graph
 class Vertex:
     def __init__(self, coords, order):
@@ -194,7 +182,7 @@ class Path:
         return Path(vertices)
     
     def load(self):
-        return sum([Task.graph[vtx].order for vtx, ord in self.nodes])
+        return sum([ord for vtx, ord in self.nodes])
     
     def travel_time(self):
         time = 0
@@ -274,7 +262,9 @@ class Path:
             return None
     
     def insertable(self, new_customers: list[tuple[str, float]]):
-        return self.load() + sum([ord for vtx, ord in new_customers]) <= Task.max_load
+        own_load = self.load()
+        new_load = sum([ord for vtx, ord in new_customers])
+        return own_load + new_load <= Task.max_load
     
     def distance(self, new_customers: list[tuple[str, float]]):
         customers = self.extract_customers( )
@@ -292,6 +282,8 @@ class Path:
                     min_dist = dist
                     min_index = index
             cumulative_distance += min_dist
+        if cumulative_distance == float('inf'):
+            print('Infinitah!')
         return cumulative_distance
     
     def insert(self, new_customers: list[tuple[str, float]]):
@@ -309,6 +301,9 @@ class Path:
                     min_dist = dist
                     min_index = index
             customers.insert(min_index, (new_vertex, new_order))
+        customers.insert(0, (Task.depot, 0))
+        customers.append((Task.depot, 0))
+        self.nodes = Path.connect(customers, 0)
 
 def clusterization_solution( ):
     clusters = [ Cluster(key) for key in Task.graph if key != Task.depot ]
@@ -336,8 +331,6 @@ def clusterization_solution( ):
             raise Exception('Clusterization failed!')
     # Transform the clusters into paths
     paths = [ ]
-    loads = [ ]
-    times = [ ]
     for cluster in clusters:
         customers = [ Task.depot ]
         while len(cluster.vertices) > 0:
@@ -354,77 +347,35 @@ def clusterization_solution( ):
         customers.append(Task.depot)
         path = Path(customers)
         paths.append(path)
-        loads.append(path.load( ))
-        times.append(path.travel_time( ))
-    return paths, loads, times
+    return paths
 
-# def greedy_solution( ):
-#     paths = [ ]
-#     loads = [ ]
-#     times = [ ]
-#     for _ in range(Task.n_vehicles):
-#         paths.append([(Task.depot, 0)])
-#         loads.append(0)
-#     vertices = { k: v.coords for k, v in Task.graph.items( ) if k != Task.depot }
-#     counter = 1000
-#     while len(vertices) > 0 and counter:
-#         vehicles = list(range(Task.n_vehicles))
-#         random.shuffle(vehicles)
-#         for i in vehicles:
-#             path = paths[i]
-#             queue = PriorityQueue( )
-#             (x0, y0) = Task.graph[path[-1][0]].coords
-#             for key, (x, y) in vertices.items( ):
-#                 dist = math.hypot(x0 - x, y0 - y)
-#                 queue.put((dist, key))
-#             while not queue.empty( ):
-#                 _, key = queue.get( )
-#                 order = Task.graph[key].order
-#                 if loads[i] + order <= Task.max_load:
-#                     paths.append((key, order))
-#                     loads[i] += order
-#                     del vertices[key]
-#                     break
-#         counter -= 1
-#     if counter > 0:   # The loop ended normally
-#         for path in paths:
-#             path.append((Task.depot, 0))
-#         for i, path in enumerate(paths):
-#             paths[i] = Path(path)
-#             time.append(paths[i].travel_time( ))
-#         return paths, load, time
-#     else:
-#         raise Exception('Initial solution generation failed')
-# 
-# def failover_solution( ):
-#     paths = [ ]
-#     loads = [ ]
-#     times = [ ]
-#     for _ in range(Task.n_vehicles):
-#         paths.append( [ (Task.depot, 0) ] )
-#         loads.append(0)
-#     vertices = PriorityQueue( )   # Greatest order first
-#     for k, v in Task.graph.items( ):
-#         if k != Task.depot:
-#             vertices.put((-v.order, k))
-#     while not vertices.empty( ):
-#         _, vertex = vertices.get( )
-#         order = Task.graph[vertex].order
-#         vehicles = PriorityQueue( )
-#         for i in range(Task.n_vehicles):
-#             vehicles.put((load[i], i))   # Least loaded first
-#         _, vehicle = vehicles.get( )
-#         if loads[vehicle] + order > Task.max_load:
-#             raise Exception('Initial solution generation failed')
-#         else:
-#             loads[vehicle] += order
-#             paths[vehicle].append((vertex, order))
-#     for path in sol:
-#         path.append((Task.depot, 0))
-#     for i, path in enumerate(sol):
-#         paths[i] = Path(path)
-#         time.append(paths[i].travel_time( ))
-#     return paths, load, time
+def failover_solution( ):
+    paths = [ ]
+    loads = [ ]
+    for _ in range(Task.n_vehicles):
+        paths.append([Task.depot])
+        loads.append(0)
+    vertices = PriorityQueue( )   # Greatest order first
+    for k, v in Task.graph.items( ):
+        if k != Task.depot:
+            vertices.put((-v.order, k))
+    while not vertices.empty( ):
+        _, vertex = vertices.get( )
+        order = Task.graph[vertex].order
+        # Least loaded first
+        vehicle = 0
+        for i in range(1, Task.n_vehicles):
+            if loads[i] < loads[vehicle]:
+                vehicle = 1
+        if loads[vehicle] + order > Task.max_load:
+            raise Exception('Initial solution generation failed')
+        else:
+            loads[vehicle] += order
+            paths[vehicle].append(vertex)
+    for path in paths:
+        path.append(Task.depot)
+    return [ Path(path) for path in paths ]
+
 
 def evaluate_solution(solution: list[Path]):
     total_time = 0
@@ -432,127 +383,125 @@ def evaluate_solution(solution: list[Path]):
         total_time += path.travel_time( )
     return total_time
 
-def neighboring_solution(solution):
-    new_solution = None
-    [strategy] = random.choices(['shuffle', 'reverse', 'move', 'transfer'], k=1)
-    if strategy == 'shuffle':
-        index = random.randrange(len(solution))
-        copy = solution[index].copy( )
-        copy.shuffle(random.randint(3, 5))
-        new_solution = [ ]
-        for i, path in enumerate(solution):
-            new_solution.append(copy if i == index else path)
-    elif strategy == 'reverse':
-        index = random.randrange(len(solution))
-        copy = solution[index].copy( )
-        copy.reverse(random.randint(2, 4))
-        new_solution = [ ]
-        for i, path in enumerate(solution):
-            new_solution.append(copy if i == index else path)
-    elif strategy == 'move':
-        index = random.randrange(len(solution))
-        copy = solution[index].copy( )
-        copy.move(random.randint(1, 3))
-        new_solution = [ ]
-        for i, path in enumerate(solution):
-            new_solution.append(copy if i == index else path)
-    elif strategy == 'transfer':
-        # index = random.randrange(len(solution))
-        # copy1 = solution[index].copy( )
-        # sequence = copy1.remove(random.randint(1, 4))
-        # min_dist, min_index = float('inf'), None
-        # for i, path in enumerate(solution):
-        #     if i == index:
-        #         continue
-        #     if path.insertable(sequence) and (dist := path.distance(sequence)) < min_dist:
-        #         min_dist = dist
-        #         min_index = i
-        # if min_index is not None:
-        #     copy2 = solution[min_index].copy( )
-        #     copy2.insert(sequence)
-        #     new_solution = [ ]
-        #     for i, path in enumerate(solution):
-        #         if i == index:
-        #             new_solution.append(copy1)
-        #         elif i == min_index:
-        #             new_solution.append(copy2)
-        #         else:
-        #             new_solution.append(path)
-        # else:
-        #     new_solution = solution   # To do: try to swap
-        index1 = random.randrange(0, len(solution))
-        copy1 = solution[index1].copy( )
-        sequence = copy1.remove(random.randint(1, 4))
-        
-        indexes = list(range(len(solution)))
-        indexes.remove(index1)
-        random.shuffle(indexes)
-        for index in indexes:
-            if solution[index].insertable(sequence):
-                copy2 = solution[index2 := index].copy( )
-                break
-        else:
-            index2, copy2 = None, None   # Cannot fit anywhere!
-        
-        if copy2 is not None:
-            copy2.insert(sequence)
-            
-            new_solution = [ ]
-            for i, path in enumerate(solution):
-                if i == index1:
-                    new_solution.append(copy1)
-                elif i == index2:
-                    new_solution.append(copy2)
-                else:
-                    new_solution.append(path)
-        else:
-            new_solution = solution   # Temporary
-    else:
-        raise Exception('Something weird has happened')
-    
-    global recent_modification
-    recent_modification = strategy
-    
+def shuffle(solution):
+    index = random.randrange(len(solution))
+    copy = solution[index].copy( )
+    copy.shuffle(random.randint(3, 5))
+    new_solution = [ ]
+    for i, path in enumerate(solution):
+        new_solution.append(copy if i == index else path)
     return new_solution
 
-def edge_time(u, v, t0):
-    return Task.graph[u].travel_time(v, t0)
+def reverse(solution):
+    index = random.randrange(len(solution))
+    copy = solution[index].copy( )
+    copy.reverse(random.randint(2, 4))
+    new_solution = [ ]
+    for i, path in enumerate(solution):
+        new_solution.append(copy if i == index else path)
+    return new_solution
 
-def main( ):
-    init(sys.argv[1])
+def move(solution):
+    index = random.randrange(len(solution))
+    copy = solution[index].copy( )
+    copy.move(random.randint(1, 3))
+    new_solution = [ ]
+    for i, path in enumerate(solution):
+        new_solution.append(copy if i == index else path)
+    return new_solution
+
+def transfer(solution):
+    index1 = random.randrange(len(solution))
+    copy1 = solution[index1].copy( )
+    sequence = copy1.remove(random.randint(1, 2))
+    min_dist, index2 = float('inf'), None
+    for i, path in enumerate(solution):
+        if i == index1:
+            continue
+        if path.insertable(sequence) and (dist := path.distance(sequence)) < min_dist:
+            min_dist = dist
+            index2 = i
+    if index2 is not None:
+        copy2 = solution[index2].copy( )
+        copy2.insert(sequence)
+        new_solution = [ ]
+        for i, path in enumerate(solution):
+            if i == index1:
+                new_solution.append(copy1)
+            elif i == index2:
+                new_solution.append(copy2)
+            else:
+                new_solution.append(path)
+    else:
+        new_solution = solution
+    return new_solution
+
+def exchange(solution):
+    # Index 1
+    index1 = random.randrange(0, len(solution))
+    copy1 = solution[index1].copy( )
+    sequence1 = copy1.remove(random.randint(1, 2))
+    # Index 2
+    index2 = random.randrange(1, len(solution))
+    if index2 == index1:
+        index2 = 0
+    copy2 = solution[index2].copy( )
+    sequence2 = copy1.remove(random.randint(1, 2))
+    # Exchange (if possible)
+    if copy1.insertable(sequence2) and copy2.insertable(sequence1):
+        copy1.insert(sequence2)
+        copy2.insert(sequence1)
+        # Solution
+        new_solution = [ ]
+        for i, path in enumerate(solution):
+            if i == index1:
+                new_solution.append(copy1)
+            elif i == index2:
+                new_solution.append(copy2)
+            else:
+                new_solution.append(path)
+    else:
+        # Failover solution
+        new_solution = solution
+    return new_solution
+
+def neighboring_solution(solution):
+    new_solution = None
+    # [strategy] = random.choices([shuffle, reverse, move, transfer, exchange], weights=[10, 10, 10, 1, 1], k=1)
+    message, strategy = random.choices([
+            ('shuffle', shuffle),
+            ('reverse', reverse),
+            ('move', move),
+            ('transfer', transfer),
+            ('exchange', exchange)
+        ], k=1)[0]
+    print(message)
+    new_solution = strategy(solution)
+    return new_solution
+
+def main(in_file, out_file):
+    init(in_file)
     
-    # paths, loads, times = None, None, None
-    # 
-    # try:
-    #     paths, loads, times = clusterization_solution( )
-    # except:
-    #     for _ in range(10):
-    #         try:
-    #             paths, loads, times = greedy_solution( )
-    #             print('break')
-    #             break
-    #         except Exception as e:
-    #             print(e)
-    #             print('exception!')
-    #             pass
-    #     else:
-    #         try:
-    #             paths, loads, times = failover_solution( )
-    #         except:
-    #             print('Failure')
-    #             exit(1)
+    try:
+        paths = clusterization_solution( )
+    except:
+        try:
+            paths = failover_solution( )
+        except Exception as e:
+            print(e)
+            exit(1)
+    print('Initial solution generation: success')
     
-    paths, loads, times = clusterization_solution( )
-    
-    N_ITER = 20000
-    TEMP   =   100
+    N_ITER = 5000
+    TEMP   =  500
     best, best_cost = paths, evaluate_solution(paths)
     current, current_cost = best, best_cost
     
-    for i in range(1, N_ITER + 1):
+    ALPHA = TEMP/N_ITER
+    for i in range(N_ITER):
         # t = TEMP / float(i + 1)
-        # t = TEMP - 0.01 * i
-        t = TEMP / math.log(1 + i)
+        t = TEMP - ALPHA * i
+        # t = TEMP / math.log(1 + i)
         
         candidate      = neighboring_solution(paths)
         candidate_cost = evaluate_solution(candidate)
@@ -560,14 +509,20 @@ def main( ):
         if (better := candidate_cost < best_cost) or random.random( ) < math.exp((current_cost - candidate_cost) / t):
             current, current_cost = candidate, candidate_cost
             if better:
-                print(f'Upgrade, {recent_modification}!')
+                print(f'Upgrade')
                 best, best_cost = candidate, candidate_cost
         
-        if i % 100 == 0:
+        if i % 10 == 0:
             print(f"Iteration {i}, temperature: {t:.3f}")
     
     best = [ [ list(node) for node in path.nodes ] for path in best ]
     print(best)
     print(best_cost)
     
-main( )
+    with open(out_file, 'w') as file:
+        json.dump(best, file)
+
+if len(sys.argv) < 3:
+    print('USAGE: python solver.py <in: graph.json> <out: solution.json>')
+else:
+    main(sys.argv[1], sys.argv[2])

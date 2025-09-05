@@ -1,5 +1,3 @@
-# NEW
-
 import json
 import math
 import matplotlib.colors as mcolors
@@ -16,7 +14,9 @@ from scipy.spatial import Delaunay
 class VertexGenerator:
     def generate(n_vertices: int) -> list[ tuple[float, float] ]:
         pass
-    
+    def plot(self, axes):
+        pass
+
 class OrthogonalVertexGenerator(VertexGenerator):
     def __init__(self, orth_radius):
         self.orth_radius = orth_radius
@@ -30,30 +30,36 @@ class OrthogonalVertexGenerator(VertexGenerator):
         return list(vertices)
 
 class CentroidVertexGenerator(VertexGenerator):
-    def generate_centroids(count, max_radius) -> list[ tuple[float, float] ]:
+    def generate_centroids(counts, radii) -> list[ tuple[float, float] ]:
         centroids = set( )
-        if count > 3:
-            centroids.add((0, 0))
-            count -= 1
+        centroids.add((0, 0))
+        
         # The centroids should be placed in more or less equal angular distances.
-        angle = math.tau / count
-        base = random.random() * math.tau
-        for i in range(count):
-            # Generate the phase
-            phase_mean = base + i * angle
-            phase_sdev = angle / 6
-            phase = random.gauss(phase_mean, phase_sdev)
-            # Generate the radius
-            radius_mean, radius_sdev = max_radius / 2, max_radius / 4
-            radius = random.gauss(radius_mean, radius_sdev)
-            radius = max(0, min(radius, max_radius))
-            # Translate to rectangular coordinates
-            c = (radius * math.cos(phase), radius * math.sin(phase))
-            centroids.add(c)
+        for i, (count, radius) in enumerate(zip(counts, radii)):
+            angle = math.tau / count
+            base = random.random() * math.tau
+            sdev = radius / 3
+            if len(radii) > 1:
+                if i == 0:
+                    sdev = (radii[i+1] - radius) / 2
+                elif i == len(radii) - 1:
+                    sdev = (radius - radii[i-1]) / 2
+                else:
+                    sdev = min(radii[i+1] - radius, radius - radii[i-1]) / 2
+            for j in range(count):
+                # Generate the phase
+                phase_mean = base + j * angle
+                phase_sdev = angle / 6
+                phase = random.gauss(phase_mean, phase_sdev)
+                # Generate the radius
+                r = random.gauss(radius, sdev)
+                # Translate to rectangular coordinates
+                c = (r * math.cos(phase), r * math.sin(phase))
+                centroids.add(c)
         return list(centroids)
         
-    def __init__(self, n_centroids, max_radius):
-        self.centroids = CentroidVertexGenerator.generate_centroids(n_centroids, max_radius)
+    def __init__(self, counts, radii):
+        self.centroids = CentroidVertexGenerator.generate_centroids(counts, radii)
     
     def nearest_neighbor_distances(points: list[ tuple[float, float] ]) -> list[float]:
         def distance_square(p, q):
@@ -110,22 +116,26 @@ class CentroidVertexGenerator(VertexGenerator):
             ver = set( )
             while len(ver) < n_ver:
                 ph = random.random() * math.tau
-                mean = d/4
-                sdev = d/12
+                mean = d/3
+                sdev = d/9
                 r = random.gauss(mean, sdev)
                 v = (round(x + r * math.cos(ph)), round(y + r * math.sin(ph)))
                 ver.add(v)
             vertices.extend(ver)
         CentroidVertexGenerator.shift_overlaps(vertices)
         return vertices
+    
+    def plot(self, axes):
+        for x, y in self.centroids:
+            axes.plot([x], [y], 'c+')
 
 def make_generator(generation_config) -> VertexGenerator:
     type = generation_config["type"]
     generator = None
     if type == 'centroid':
-        n_centroids = generation_config["n_centroids"]
-        max_radius = generation_config["max_radius"]
-        generator = CentroidVertexGenerator(n_centroids, max_radius)
+        counts = generation_config["n_centroids"]
+        radii  = generation_config["radius"]
+        generator = CentroidVertexGenerator(counts, radii)
     elif type == 'orthogonal':
         radius = generation_config["radius"]
         generator = OrthogonalVertexGenerator(radius)
@@ -143,8 +153,10 @@ class Graph:
         self.n_vehicles = None
         self.max_load   = None
         self.interval   = None
+        self.generator  = None
     
     def generate_body(self, n_vertices, generator, min_angle_deg):
+        self.generator = generator
         self.vertices = generator.generate(n_vertices)
         self.edges = Graph.connect(self.vertices, min_angle_deg)
     
@@ -322,6 +334,7 @@ class Graph:
     
     def plot(self, axes):
         axes.clear( )
+        self.generator.plot(axes)
         # Edges
         minimum, maximum = Graph.boundaries(self.weights)
         a, b = Graph.linear_transform_coefficients(minimum, maximum, 0, 1)
